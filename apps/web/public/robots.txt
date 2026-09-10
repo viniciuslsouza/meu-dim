@@ -1,0 +1,9 @@
+# *
+User-agent: *
+Allow: /
+
+# Host
+Host: https://meudim.com.br
+
+# Sitemaps
+Sitemap: https://meudim.com.br/sitemap.xml

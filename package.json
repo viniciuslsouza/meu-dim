@@ -4,10 +4,12 @@
   "private": true,
   "packageManager": "pnpm@10.15.1",
   "scripts": {
+    "postinstall": "node scripts/copy-pdf-worker.mjs",
     "dev": "turbo dev",
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "turbo lint"
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck"
   },
   "devDependencies": {
     "eslint": "^8.57.1",
