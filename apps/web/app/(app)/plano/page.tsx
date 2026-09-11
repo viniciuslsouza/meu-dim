@@ -6,21 +6,26 @@ import {
   Check,
   CreditCard,
   Edit3,
+  Info,
   LockKeyhole,
   Plus,
   QrCode,
   ShieldCheck,
   Trash2,
-  WalletCards
+  WalletCards,
+  X
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { AppHeader } from "@/components/app-header";
 import { AuthModal } from "@/components/auth-modal";
 import { apiRequest, getAccessToken } from "@/lib/api";
 import { formatBRL, formatMonth } from "@/lib/format";
-import { usePlanStore } from "@/lib/stores/plan.store";
+import {
+  getSelectedDebts,
+  usePlanStore
+} from "@/lib/stores/plan.store";
 import { useStatementStore } from "@/lib/stores/statement.store";
 import type { Debt, DebtType } from "@meudim/shared";
 
@@ -30,6 +35,10 @@ const DEBT_TYPES: { value: DebtType; label: string }[] = [
   { value: "OVERDRAFT", label: "Cheque especial" },
   { value: "OTHER", label: "Outro" }
 ];
+
+function debtTypeLabel(type: DebtType): string {
+  return DEBT_TYPES.find((option) => option.value === type)?.label ?? type;
+}
 
 interface ReferenceRates {
   rates: { type: DebtType; avgRate: number }[];
@@ -50,10 +59,12 @@ interface StripeResponse {
 
 function DebtForm({
   onSave,
-  editing
+  editing,
+  embedded = false
 }: {
   onSave: (debt: Debt) => void;
   editing?: Debt | null;
+  embedded?: boolean;
 }): React.JSX.Element {
   const [name, setName] = useState(editing?.name ?? "");
   const [type, setType] = useState<DebtType>(
@@ -105,17 +116,22 @@ function DebtForm({
           setMinimumPayment("");
         }
       }}
-      className="grid gap-4 rounded-3xl border border-ink-border bg-white p-5 shadow-card sm:p-7"
+      className={
+        embedded
+          ? "grid gap-4"
+          : "grid gap-4 rounded-3xl border border-ink-border bg-white p-5 shadow-card sm:p-7"
+      }
     >
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-brand-900">
           Nome da dívida
           <input
             required
+            type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Ex.: Cartão Nubank"
-            className="rounded-xl border border-ink-border px-4 py-3 outline-none focus:border-accent-700"
+            className="h-12 w-full rounded-xl border border-ink-border bg-white px-4 text-base leading-none outline-none focus:border-accent-700"
           />
         </label>
         <label className="grid gap-2 text-sm font-medium text-brand-900">
@@ -123,7 +139,7 @@ function DebtForm({
           <select
             value={type}
             onChange={(event) => setType(event.target.value as DebtType)}
-            className="rounded-xl border border-ink-border bg-white px-4 py-3 outline-none focus:border-accent-700"
+            className="h-12 w-full rounded-xl border border-ink-border bg-white px-4 text-base outline-none focus:border-accent-700"
           >
             {DEBT_TYPES.map((option) => (
               <option key={option.value} value={option.value}>
@@ -133,56 +149,76 @@ function DebtForm({
           </select>
         </label>
       </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <label className="grid gap-2 text-sm font-medium text-brand-900">
-          Saldo devedor (R$)
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid min-w-0 gap-2">
+          <div className="flex h-5 items-center">
+            <label
+              htmlFor="debt-balance"
+              className="text-sm font-medium text-brand-900"
+            >
+              Saldo devedor (R$)
+            </label>
+          </div>
           <input
+            id="debt-balance"
             required
-            min="1"
-            step="0.01"
+            type="text"
             inputMode="decimal"
             value={balance}
             onChange={(event) => setBalance(event.target.value)}
-            className="rounded-xl border border-ink-border px-4 py-3 outline-none focus:border-accent-700"
+            className="h-12 w-full rounded-xl border border-ink-border bg-white px-4 text-base leading-none outline-none focus:border-accent-700"
           />
-        </label>
-        <label className="grid gap-2 text-sm font-medium text-brand-900">
-          Juros (% ao mês)
+        </div>
+        <div className="grid min-w-0 gap-2">
+          <div className="flex h-5 items-center justify-between gap-2">
+            <label
+              htmlFor="debt-monthly-rate"
+              className="text-sm font-medium text-brand-900"
+            >
+              Juros (% ao mês)
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                const rate = referenceRates?.rates.find(
+                  (item) => item.type === type
+                );
+                if (rate) setMonthlyRate(String(rate.avgRate * 100));
+              }}
+              className="shrink-0 text-xs font-semibold text-accent-700 hover:underline"
+            >
+              Taxa ref.
+            </button>
+          </div>
           <input
+            id="debt-monthly-rate"
             required
-            min="0"
-            max="30"
-            step="0.01"
+            type="text"
             inputMode="decimal"
             value={monthlyRate}
             onChange={(event) => setMonthlyRate(event.target.value)}
-            className="rounded-xl border border-ink-border px-4 py-3 outline-none focus:border-accent-700"
+            className="h-12 w-full rounded-xl border border-ink-border bg-white px-4 text-base leading-none outline-none focus:border-accent-700"
           />
-          <button
-            type="button"
-            onClick={() => {
-              const rate = referenceRates?.rates.find(
-                (item) => item.type === type
-              );
-              if (rate) setMonthlyRate(String(rate.avgRate * 100));
-            }}
-            className="text-left text-xs font-semibold text-accent-700"
-          >
-            Usar taxa de referência
-          </button>
-        </label>
-        <label className="grid gap-2 text-sm font-medium text-brand-900">
-          Pagamento mínimo (R$)
+        </div>
+        <div className="grid min-w-0 gap-2">
+          <div className="flex h-5 items-center">
+            <label
+              htmlFor="debt-minimum-payment"
+              className="text-sm font-medium text-brand-900"
+            >
+              Pagamento mínimo (R$)
+            </label>
+          </div>
           <input
+            id="debt-minimum-payment"
             required
-            min="1"
-            step="0.01"
+            type="text"
             inputMode="decimal"
             value={minimumPayment}
             onChange={(event) => setMinimumPayment(event.target.value)}
-            className="rounded-xl border border-ink-border px-4 py-3 outline-none focus:border-accent-700"
+            className="h-12 w-full rounded-xl border border-ink-border bg-white px-4 text-base leading-none outline-none focus:border-accent-700"
           />
-        </label>
+        </div>
       </div>
       <button
         type="submit"
@@ -197,32 +233,79 @@ function DebtForm({
 
 function StrategyCard({
   title,
+  summary,
+  explanation,
+  debtOrderLabels,
   result,
   selected,
   onSelect
 }: {
   title: string;
+  summary: string;
+  explanation: string;
+  debtOrderLabels: string[];
   result: NonNullable<
     ReturnType<typeof usePlanStore.getState>["localSimulation"]
   >["snowball"];
   selected: boolean;
   onSelect: () => void;
 }): React.JSX.Element {
+  const tooltipId = useId();
+  const [infoOpen, setInfoOpen] = useState(false);
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
       className={[
-        "rounded-2xl border p-5 text-left transition",
+        "cursor-pointer rounded-2xl border p-5 text-left transition",
         selected
           ? "border-accent-700 bg-accent-50 ring-2 ring-accent-100"
           : "border-ink-border bg-white hover:border-brand-400"
       ].join(" ")}
     >
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-brand-900">{title}</h3>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <h3 className="font-semibold text-brand-900">{title}</h3>
+            <span
+              className="relative inline-flex"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                aria-label={`O que é ${title}`}
+                aria-expanded={infoOpen}
+                aria-controls={tooltipId}
+                onClick={() => setInfoOpen((open) => !open)}
+                onBlur={() => setInfoOpen(false)}
+                className="grid h-5 w-5 place-items-center rounded-full border border-ink-border bg-white text-ink-muted transition hover:border-brand-400 hover:text-brand-900"
+              >
+                <Info className="h-3 w-3" />
+              </button>
+              {infoOpen ? (
+                <span
+                  id={tooltipId}
+                  role="tooltip"
+                  className="absolute left-0 top-7 z-20 w-64 rounded-xl border border-ink-border bg-white p-3 text-xs font-medium leading-5 text-ink-muted shadow-card sm:left-auto sm:right-0"
+                >
+                  {explanation}
+                </span>
+              ) : null}
+            </span>
+          </div>
+          <p className="mt-1 text-sm leading-5 text-ink-muted">{summary}</p>
+        </div>
         {selected ? (
-          <span className="grid h-6 w-6 place-items-center rounded-full bg-accent-700 text-white">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-accent-700 text-white">
             <Check className="h-4 w-4" />
           </span>
         ) : null}
@@ -232,28 +315,35 @@ function StrategyCard({
           Orçamento insuficiente.
         </p>
       ) : (
-        <div className="mt-5 grid grid-cols-3 gap-3">
-          <div>
-            <strong className="block text-xl text-brand-900">
-              {result.months}
-            </strong>
-            <span className="text-xs text-ink-muted">meses</span>
+        <>
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            <div>
+              <strong className="block text-xl text-brand-900">
+                {result.months}
+              </strong>
+              <span className="text-xs text-ink-muted">meses</span>
+            </div>
+            <div>
+              <strong className="block text-lg text-brand-900">
+                {formatBRL(result.totalInterest)}
+              </strong>
+              <span className="text-xs text-ink-muted">em juros</span>
+            </div>
+            <div>
+              <strong className="block text-sm capitalize text-brand-900">
+                {result.payoffDate ? formatMonth(result.payoffDate) : "—"}
+              </strong>
+              <span className="text-xs text-ink-muted">quitação</span>
+            </div>
           </div>
-          <div>
-            <strong className="block text-lg text-brand-900">
-              {formatBRL(result.totalInterest)}
-            </strong>
-            <span className="text-xs text-ink-muted">em juros</span>
-          </div>
-          <div>
-            <strong className="block text-sm capitalize text-brand-900">
-              {result.payoffDate ? formatMonth(result.payoffDate) : "—"}
-            </strong>
-            <span className="text-xs text-ink-muted">quitação</span>
-          </div>
-        </div>
+          {debtOrderLabels.length > 1 ? (
+            <p className="mt-4 text-xs leading-5 text-ink-muted">
+              Ordem: {debtOrderLabels.join(" → ")}
+            </p>
+          ) : null}
+        </>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -266,46 +356,79 @@ function PlanPageContent(): React.JSX.Element {
   );
   const {
     debts,
+    selectedDebtIds,
     monthlyBudget,
     localSimulation,
     chosenStrategy,
+    hasHydrated: planHydrated,
     addDebt,
     removeDebt,
     updateDebt,
+    syncImportedStatementDebt,
+    toggleDebtSelected,
     setBudget,
     setChosenStrategy,
     setCheckout
   } = usePlanStore();
+  const statementHydrated = useStatementStore((state) => state.hasHydrated);
   const [step, setStep] = useState(1);
   const [editing, setEditing] = useState<Debt | null>(null);
+  const [showDebtForm, setShowDebtForm] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [pendingProvider, setPendingProvider] = useState<
     "MERCADOPAGO" | "STRIPE"
   >("MERCADOPAGO");
-  const minimumRequired = useMemo(
-    () => debts.reduce((sum, debt) => sum + debt.minimumPayment, 0),
-    [debts]
+  const selectedDebts = useMemo(
+    () => getSelectedDebts(debts, selectedDebtIds),
+    [debts, selectedDebtIds]
   );
+  const minimumRequired = useMemo(
+    () =>
+      selectedDebts.reduce((sum, debt) => sum + debt.minimumPayment, 0),
+    [selectedDebts]
+  );
+  const formOpen = showDebtForm || editing != null;
+  const syncedStatementKey = useRef<string | null>(null);
 
   useEffect(() => {
-    if (
-      debts.length === 0 &&
-      parsedStatement &&
-      (parsedStatement.total ?? 0) > 0
-    ) {
-      addDebt({
-        id: crypto.randomUUID(),
-        name: `Fatura ${parsedStatement.bank}`,
-        type: "CREDIT_CARD",
-        balance: parsedStatement.total ?? 0,
-        monthlyRate: 0.149,
-        minimumPayment: Math.max(
-          parsedStatement.minimumPayment ?? 0,
-          (parsedStatement.total ?? 0) * 0.15
-        )
-      });
+    if (!planHydrated || !statementHydrated) {
+      return;
     }
-  }, [addDebt, debts.length, parsedStatement]);
+
+    if (!parsedStatement || (parsedStatement.total ?? 0) <= 0) {
+      return;
+    }
+
+    const balance = parsedStatement.total ?? 0;
+    const statementKey = [
+      parsedStatement.bank,
+      balance,
+      parsedStatement.minimumPayment ?? "",
+      parsedStatement.dueDate ?? "",
+      parsedStatement.referenceMonth ?? ""
+    ].join("|");
+
+    if (syncedStatementKey.current === statementKey) {
+      return;
+    }
+
+    syncedStatementKey.current = statementKey;
+    syncImportedStatementDebt({
+      name: `Fatura ${parsedStatement.bank}`,
+      type: "CREDIT_CARD",
+      balance,
+      monthlyRate: 0.149,
+      minimumPayment: Math.max(
+        parsedStatement.minimumPayment ?? 0,
+        balance * 0.15
+      )
+    });
+  }, [
+    parsedStatement,
+    planHydrated,
+    statementHydrated,
+    syncImportedStatementDebt
+  ]);
 
   useEffect(() => {
     if (searchParams.get("continuarPagamento") === "true" && getAccessToken()) {
@@ -433,66 +556,159 @@ function PlanPageContent(): React.JSX.Element {
         {step === 1 ? (
           <section>
             <h1 className="text-3xl font-bold tracking-tight text-brand-900">
-              Quais dívidas você quer quitar?
+              Quais dívidas entram no plano?
             </h1>
             <p className="mt-3 text-ink-muted">
-              Adicione cartões, empréstimos e cheque especial.
+              {parsedStatement
+                ? "Selecione as faturas e dívidas que você quer quitar agora."
+                : "Selecione as dívidas do plano ou adicione uma nova para continuar."}
             </p>
-            <div className="mt-8">
-              <DebtForm
-                key={editing?.id ?? "new"}
-                editing={editing}
-                onSave={(debt) => {
-                  if (editing?.id) {
-                    updateDebt(editing.id, debt);
-                    setEditing(null);
-                  } else {
-                    addDebt(debt);
-                  }
-                }}
-              />
-            </div>
-            <div className="mt-6 grid gap-3">
-              {debts.map((debt) => (
-                <article
-                  key={debt.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-ink-border bg-white p-5 sm:flex-row sm:items-center"
+
+            {debts.length > 0 ? (
+              <div className="mt-8 grid gap-3">
+                {debts.map((debt) => {
+                  const id = debt.id ?? "";
+                  const selected = selectedDebtIds.includes(id);
+
+                  return (
+                    <article
+                      key={id}
+                      className={[
+                        "flex flex-col gap-4 rounded-2xl border bg-white p-5 transition sm:flex-row sm:items-center",
+                        selected
+                          ? "border-accent-700 ring-2 ring-accent-100"
+                          : "border-ink-border"
+                      ].join(" ")}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleDebtSelected(id)}
+                        aria-pressed={selected}
+                        aria-label={`${selected ? "Remover" : "Incluir"} ${debt.name} no plano`}
+                        className="flex min-w-0 flex-1 items-start gap-4 text-left"
+                      >
+                        <span
+                          className={[
+                            "mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border",
+                            selected
+                              ? "border-accent-700 bg-accent-700 text-white"
+                              : "border-ink-border bg-white text-transparent"
+                          ].join(" ")}
+                        >
+                          <Check className="h-4 w-4" />
+                        </span>
+                        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
+                          <CreditCard className="h-5 w-5" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold text-brand-900">
+                            {debt.name}
+                          </span>
+                          <span className="mt-1 block text-sm text-ink-muted">
+                            {debtTypeLabel(debt.type)} · {formatBRL(debt.balance)}{" "}
+                            · {(debt.monthlyRate * 100).toFixed(2)}% a.m. · mínimo{" "}
+                            {formatBRL(debt.minimumPayment)}
+                          </span>
+                        </span>
+                      </button>
+                      <div className="flex gap-2 sm:pl-2">
+                        <button
+                          type="button"
+                          aria-label={`Editar ${debt.name}`}
+                          onClick={() => {
+                            setEditing(debt);
+                            setShowDebtForm(true);
+                          }}
+                          className="grid h-9 w-9 place-items-center rounded-lg border border-ink-border text-ink-muted"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Remover ${debt.name}`}
+                          onClick={() => removeDebt(id)}
+                          className="grid h-9 w-9 place-items-center rounded-lg border border-danger-100 text-danger-600"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mt-8 rounded-3xl border border-dashed border-ink-border bg-white p-8 text-center">
+                <p className="font-medium text-brand-900">
+                  Nenhuma dívida por aqui ainda
+                </p>
+                <p className="mt-2 text-sm text-ink-muted">
+                  Importe uma fatura ou adicione uma dívida manualmente para
+                  montar seu plano.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-6">
+              {formOpen ? (
+                <div className="rounded-3xl border border-ink-border bg-white p-1 shadow-card">
+                  <div className="flex items-center justify-between px-5 pt-4">
+                    <h2 className="font-semibold text-brand-900">
+                      {editing ? "Editar dívida" : "Nova dívida"}
+                    </h2>
+                    <button
+                      type="button"
+                      aria-label="Fechar formulário"
+                      onClick={() => {
+                        setEditing(null);
+                        setShowDebtForm(false);
+                      }}
+                      className="grid h-9 w-9 place-items-center rounded-lg text-ink-muted hover:bg-surface-muted"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="p-4 pt-2 sm:p-6 sm:pt-3">
+                    <DebtForm
+                      key={editing?.id ?? "new"}
+                      editing={editing}
+                      embedded
+                      onSave={(debt) => {
+                        if (editing?.id) {
+                          updateDebt(editing.id, debt);
+                          setEditing(null);
+                        } else {
+                          addDebt(debt);
+                        }
+                        setShowDebtForm(false);
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowDebtForm(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-ink-border bg-white px-5 py-3 font-semibold text-brand-900 hover:border-brand-400"
                 >
-                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-600">
-                    <CreditCard className="h-5 w-5" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <h2 className="font-semibold text-brand-900">{debt.name}</h2>
-                    <p className="mt-1 text-sm text-ink-muted">
-                      {formatBRL(debt.balance)} ·{" "}
-                      {(debt.monthlyRate * 100).toFixed(2)}% a.m. · mínimo{" "}
-                      {formatBRL(debt.minimumPayment)}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      aria-label={`Editar ${debt.name}`}
-                      onClick={() => setEditing(debt)}
-                      className="grid h-9 w-9 place-items-center rounded-lg border border-ink-border text-ink-muted"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Remover ${debt.name}`}
-                      onClick={() => removeDebt(debt.id ?? "")}
-                      className="grid h-9 w-9 place-items-center rounded-lg border border-danger-100 text-danger-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </article>
-              ))}
+                  <Plus className="h-4 w-4" />
+                  Adicionar outra dívida
+                </button>
+              )}
             </div>
+
+            {selectedDebts.length > 0 ? (
+              <p className="mt-5 text-sm text-ink-muted">
+                {selectedDebts.length}{" "}
+                {selectedDebts.length === 1
+                  ? "dívida selecionada"
+                  : "dívidas selecionadas"}{" "}
+                · mínimo mensal {formatBRL(minimumRequired)}
+              </p>
+            ) : null}
+
             <button
               type="button"
-              disabled={debts.length === 0}
+              disabled={selectedDebts.length === 0}
               onClick={() => {
                 if (monthlyBudget <= 0) setBudget(minimumRequired);
                 setStep(2);
@@ -519,7 +735,9 @@ function PlanPageContent(): React.JSX.Element {
               Quanto você consegue pagar por mês?
             </h1>
             <p className="mt-3 leading-7 text-ink-muted">
-              Considere o valor total disponível para todas as dívidas.
+              Considere o valor total disponível para as{" "}
+              {selectedDebts.length}{" "}
+              {selectedDebts.length === 1 ? "dívida selecionada" : "dívidas selecionadas"}.
             </p>
             <div className="mt-8 rounded-3xl border border-ink-border bg-white p-6 shadow-card sm:p-8">
               <label className="grid gap-2 font-medium text-brand-900">
@@ -566,19 +784,43 @@ function PlanPageContent(): React.JSX.Element {
                 <strong>{formatBRL(minimumRequired - monthlyBudget)}</strong>.
               </div>
             ) : localSimulation ? (
-              <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                <StrategyCard
-                  title="Bola de neve"
-                  result={localSimulation.snowball}
-                  selected={chosenStrategy === "SNOWBALL"}
-                  onSelect={() => setChosenStrategy("SNOWBALL")}
-                />
-                <StrategyCard
-                  title="Avalanche"
-                  result={localSimulation.avalanche}
-                  selected={chosenStrategy === "AVALANCHE"}
-                  onSelect={() => setChosenStrategy("AVALANCHE")}
-                />
+              <div className="mt-5 space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <StrategyCard
+                    title="Bola de neve"
+                    summary="Paga primeiro a dívida de menor saldo."
+                    explanation="Bola de neve prioriza a dívida com o menor valor em aberto. A ideia é gerar a primeira quitação mais cedo e manter a motivação, mesmo que os juros totais fiquem um pouco maiores."
+                    debtOrderLabels={localSimulation.snowball.debtOrder.map(
+                      (id) => debts.find((debt) => debt.id === id)?.name ?? id
+                    )}
+                    result={localSimulation.snowball}
+                    selected={chosenStrategy === "SNOWBALL"}
+                    onSelect={() => setChosenStrategy("SNOWBALL")}
+                  />
+                  <StrategyCard
+                    title="Avalanche"
+                    summary="Paga primeiro a dívida de maior juros."
+                    explanation="Avalanche prioriza a dívida com a maior taxa de juros. Em geral economiza mais no longo prazo, porque reduz antes o custo mais caro."
+                    debtOrderLabels={localSimulation.avalanche.debtOrder.map(
+                      (id) => debts.find((debt) => debt.id === id)?.name ?? id
+                    )}
+                    result={localSimulation.avalanche}
+                    selected={chosenStrategy === "AVALANCHE"}
+                    onSelect={() => setChosenStrategy("AVALANCHE")}
+                  />
+                </div>
+                {!localSimulation.snowball.infeasible &&
+                !localSimulation.avalanche.infeasible &&
+                localSimulation.snowball.months ===
+                  localSimulation.avalanche.months &&
+                localSimulation.snowball.totalInterest ===
+                  localSimulation.avalanche.totalInterest ? (
+                  <p className="rounded-2xl border border-ink-border bg-brand-50 p-4 text-sm leading-6 text-brand-900">
+                    {selectedDebts.length <= 1
+                      ? "Com apenas 1 dívida, bola de neve e avalanche geram o mesmo plano. A diferença aparece quando você adiciona 2 ou mais dívidas."
+                      : "Neste orçamento, as duas estratégias chegam ao mesmo tempo e ao mesmo custo de juros. A diferença fica na ordem em que as dívidas são quitadas."}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             <button
@@ -620,12 +862,22 @@ function PlanPageContent(): React.JSX.Element {
             <div className="mt-8 grid gap-5 md:grid-cols-2">
               <StrategyCard
                 title="Bola de neve"
+                summary="Paga primeiro a dívida de menor saldo."
+                explanation="Bola de neve prioriza a dívida com o menor valor em aberto. A ideia é gerar a primeira quitação mais cedo e manter a motivação, mesmo que os juros totais fiquem um pouco maiores."
+                debtOrderLabels={localSimulation.snowball.debtOrder.map(
+                  (id) => debts.find((debt) => debt.id === id)?.name ?? id
+                )}
                 result={localSimulation.snowball}
                 selected={chosenStrategy === "SNOWBALL"}
                 onSelect={() => setChosenStrategy("SNOWBALL")}
               />
               <StrategyCard
                 title="Avalanche"
+                summary="Paga primeiro a dívida de maior juros."
+                explanation="Avalanche prioriza a dívida com a maior taxa de juros. Em geral economiza mais no longo prazo, porque reduz antes o custo mais caro."
+                debtOrderLabels={localSimulation.avalanche.debtOrder.map(
+                  (id) => debts.find((debt) => debt.id === id)?.name ?? id
+                )}
                 result={localSimulation.avalanche}
                 selected={chosenStrategy === "AVALANCHE"}
                 onSelect={() => setChosenStrategy("AVALANCHE")}

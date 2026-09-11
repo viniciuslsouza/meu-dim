@@ -19,7 +19,6 @@ import {
 import {
   AlertTriangle,
   Download,
-  Share2,
   Sparkles
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
@@ -28,10 +27,34 @@ import { useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { getAccessToken } from "@/lib/api";
 import { formatBRL, formatMonth } from "@/lib/format";
-import { usePlanStore } from "@/lib/stores/plan.store";
+import { getSelectedDebts, usePlanStore } from "@/lib/stores/plan.store";
 import { useStatementStore } from "@/lib/stores/statement.store";
 
 const COLORS = ["#0F766E", "#2F5D8C", "#D97706", "#4A78A8", "#34D399"];
+
+function scheduleMonthLabel(monthIndex: number): string {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + monthIndex);
+
+  return date.toLocaleDateString("pt-BR", {
+    month: "short",
+    year: "2-digit"
+  }).replace(".", "");
+}
+
+function scheduleMonthTitle(monthIndex: number): string {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + monthIndex);
+
+  const label = date.toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric"
+  });
+
+  return `Mês ${monthIndex} · ${label}`;
+}
 
 function ScheduleChart({
   result,
@@ -41,7 +64,8 @@ function ScheduleChart({
   debtNames: Map<string, string>;
 }): React.JSX.Element {
   const data = result.schedule.map((row) => ({
-    month: `M${row.month}`,
+    month: scheduleMonthLabel(row.month),
+    monthTitle: scheduleMonthTitle(row.month),
     ...Object.fromEntries(
       row.debts.map((debt) => [debt.id, debt.balance])
     )
@@ -53,7 +77,12 @@ function ScheduleChart({
   return (
     <div className="h-[340px] w-full overflow-hidden">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 10, right: 8, left: -10, bottom: 0 }}>
+        <BarChart
+          data={data}
+          margin={{ top: 10, right: 8, left: -10, bottom: 0 }}
+          barCategoryGap={data.length <= 4 ? "28%" : "18%"}
+          maxBarSize={48}
+        >
           <CartesianGrid vertical={false} stroke="#E8EEF4" />
           <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748B" }} />
           <YAxis
@@ -61,6 +90,9 @@ function ScheduleChart({
             tickFormatter={(value: number) => `${Math.round(value / 1000)}k`}
           />
           <Tooltip
+            labelFormatter={(_label, payload) =>
+              String(payload?.[0]?.payload?.monthTitle ?? _label)
+            }
             formatter={(value, name) => [
               formatBRL(Number(value)),
               debtNames.get(String(name)) ?? String(name)
@@ -76,6 +108,7 @@ function ScheduleChart({
               dataKey={id}
               stackId="balances"
               fill={COLORS[index % COLORS.length]}
+              radius={[4, 4, 0, 0]}
             />
           ))}
         </BarChart>
@@ -89,6 +122,7 @@ export default function FullPlanPage(): React.JSX.Element {
   const router = useRouter();
   const {
     debts,
+    selectedDebtIds,
     monthlyBudget,
     localSimulation,
     chosenStrategy
@@ -102,8 +136,13 @@ export default function FullPlanPage(): React.JSX.Element {
   const [refinance, setRefinance] = useState<RefinanceComparison | null>(null);
   const [cutAmounts, setCutAmounts] = useState<Record<string, number>>({});
   const isDemo = params.id.startsWith("demo-");
+  const selectedDebts = getSelectedDebts(debts, selectedDebtIds);
 
-  if (!localSimulation || debts.length === 0 || (!isDemo && !getAccessToken())) {
+  if (
+    !localSimulation ||
+    selectedDebts.length === 0 ||
+    (!isDemo && !getAccessToken())
+  ) {
     return (
       <div className="grid min-h-screen place-items-center bg-surface-page p-5">
         <div className="max-w-md rounded-3xl border border-ink-border bg-white p-8 text-center shadow-card">
@@ -135,7 +174,10 @@ export default function FullPlanPage(): React.JSX.Element {
       ? localSimulation.snowball
       : localSimulation.avalanche;
   const debtNames = new Map(
-    debts.map((debt, index) => [debt.id ?? `debt-${index}`, debt.name])
+    selectedDebts.map((debt, index) => [
+      debt.id ?? `debt-${index}`,
+      debt.name
+    ])
   );
   const totalCut = Object.values(cutAmounts).reduce(
     (sum, value) => sum + value,
@@ -143,7 +185,7 @@ export default function FullPlanPage(): React.JSX.Element {
   );
   const cutImpact =
     totalCut > 0
-      ? simulateCutImpact(debts, monthlyBudget, totalCut)
+      ? simulateCutImpact(selectedDebts, monthlyBudget, totalCut)
       : null;
   const avoidable = diagnosis?.topOffenders.filter(({ category }) =>
     ["Delivery", "Lazer", "Compras online", "Alimentação fora"].includes(
@@ -213,7 +255,7 @@ export default function FullPlanPage(): React.JSX.Element {
                 Evolução do saldo
               </h2>
               <p className="mt-1 text-sm text-ink-muted">
-                Saldo restante de cada dívida mês a mês.
+                Quanto ainda resta de cada dívida a cada mês do plano.
               </p>
               <div className="mt-5">
                 <ScheduleChart result={selectedResult} debtNames={debtNames} />
@@ -315,7 +357,7 @@ export default function FullPlanPage(): React.JSX.Element {
               onClick={() =>
                 setRefinance(
                   compareRefinance(
-                    debts,
+                    selectedDebts,
                     monthlyBudget,
                     loanRate / 100,
                     loanMonths
@@ -401,24 +443,15 @@ export default function FullPlanPage(): React.JSX.Element {
           </section>
         ) : null}
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <button
-            type="button"
-            disabled
-            title="O PDF está sendo gerado"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-900 px-5 py-3 font-semibold text-white disabled:opacity-65"
-          >
-            <Download className="h-4 w-4" />
-            Gerando PDF… aguarde
-          </button>
+        <div className="mt-6 flex justify-center">
           <button
             type="button"
             disabled
             title="Em breve"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-ink-border bg-white px-5 py-3 font-semibold text-brand-900 disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-900 px-5 py-3 font-semibold text-white disabled:opacity-65"
           >
-            <Share2 className="h-4 w-4" />
-            Compartilhar progresso · Em breve
+            <Download className="h-4 w-4" />
+            Baixar PDF
           </button>
         </div>
       </main>

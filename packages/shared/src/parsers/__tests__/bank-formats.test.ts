@@ -177,4 +177,62 @@ describe("Bradesco PDF", () => {
       installments: 2
     });
   });
+
+  it("ignora limites e taxas misturados na coluna de lançamentos", () => {
+    const statement = requirePdfParser(bradesco)([
+      [
+        "Banco Bradesco S/A",
+        "Total da fatura em real 2.332,29",
+        "Pagamento mínimo R$ 397,91",
+        "Vencimento 11/09/2026",
+        "Data Histórico de Lançamentos Cidade US$ Cotação do Dólar R$",
+        "10/08 PAG BOLETO BANCARIO 2.136,85 -",
+        "28/08 CUSTO TRANS. EXTERIOR-IOF 11,26",
+        "VINICIUS SOUZA Cartão 4004 XXXX XXXX 9548",
+        "Compras R$ 7.500,00 R$ 2.921,98 R$ 4.578,02",
+        "04/06 BRS*SHEINCOM 03/03 Sao Paulo 84,19",
+        "04/07 ZP *ABBA JOIAS 02/02 Guarulhos 170,37 Saque R$ 3.000,00 R$ 0,00 R$ 3.000,00",
+        "02/08 99Food *Jet Pizzas Guarul Sao Paulo 134,82",
+        "Taxas mensais",
+        "06/08 APPLE.COM/BILL SAO PAULO 5,90 Taxa ao Taxa ao CET Taxas Máx. p/",
+        "Mês (%) Ano (%) (Ano) Próx. Período",
+        "07/08 CURSOR, AI POWERED IDE USD 60,00 CURSOR.COM 60,00 5,3600 321,60",
+        "Pagamento de Contas 1,99% 26,67% 55,72% 2,99%",
+        "20/08 CENTAURO COM BR 01/02 PRESIDENTE 100,00 Crediário 4,99% 79,38% 85,94% 6,99%",
+        "Total para VINICIUS SOUZA 2.321,03"
+      ].join("\n")
+    ]);
+
+    expect(statement.total).toBe(2332.29);
+    expect(statement.transactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          description: expect.stringContaining("CUSTO TRANS. EXTERIOR-IOF"),
+          amount: 11.26
+        }),
+        expect.objectContaining({
+          description: expect.stringContaining("ABBA JOIAS"),
+          amount: 170.37
+        }),
+        expect.objectContaining({
+          description: expect.stringContaining("APPLE.COM/BILL"),
+          amount: 5.9
+        }),
+        expect.objectContaining({
+          description: expect.stringContaining("CURSOR"),
+          amount: 321.6
+        }),
+        expect.objectContaining({
+          description: expect.stringContaining("CENTAURO"),
+          amount: 100
+        })
+      ])
+    );
+    expect(
+      statement.transactions.some((transaction) => transaction.amount === 4578.02)
+    ).toBe(false);
+    expect(
+      statement.transactions.some((transaction) => transaction.amount === 3000)
+    ).toBe(false);
+  });
 });

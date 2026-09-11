@@ -15,7 +15,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/app-header";
 import { apiRequest } from "@/lib/api";
 import { formatBRL } from "@/lib/format";
-import { usePlanStore } from "@/lib/stores/plan.store";
+import { getSelectedDebts, usePlanStore } from "@/lib/stores/plan.store";
 
 function formatRemaining(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -33,12 +33,17 @@ function CheckoutPageContent(): React.JSX.Element {
   const {
     checkout,
     debts,
+    selectedDebtIds,
     monthlyBudget,
     chosenStrategy,
     savedPlanId,
     setCheckoutStatus,
     setSavedPlanId
   } = usePlanStore();
+  const selectedDebts = useMemo(
+    () => getSelectedDebts(debts, selectedDebtIds),
+    [debts, selectedDebtIds]
+  );
   const paymentId = searchParams.get("paymentId") ?? checkout?.paymentId;
   const stripeSuccess = searchParams.get("success") === "true";
   const [now, setNow] = useState(Date.now());
@@ -85,7 +90,12 @@ function CheckoutPageContent(): React.JSX.Element {
   }, [paymentQuery.data?.status, setCheckoutStatus]);
 
   useEffect(() => {
-    if (status !== "PAID" || savedPlanId || unlocking || debts.length === 0) {
+    if (
+      status !== "PAID" ||
+      savedPlanId ||
+      unlocking ||
+      selectedDebts.length === 0
+    ) {
       return;
     }
 
@@ -99,7 +109,7 @@ function CheckoutPageContent(): React.JSX.Element {
     void apiRequest<{ id: string }>("/plans", {
       method: "POST",
       body: JSON.stringify({
-        debts: debts.map(({ id: _id, ...debt }) => debt),
+        debts: selectedDebts.map(({ id: _id, ...debt }) => debt),
         monthlyBudget,
         chosenStrategy
       })
@@ -109,9 +119,9 @@ function CheckoutPageContent(): React.JSX.Element {
   }, [
     checkout?.demo,
     chosenStrategy,
-    debts,
     monthlyBudget,
     savedPlanId,
+    selectedDebts,
     setSavedPlanId,
     status,
     stripeSuccess,
